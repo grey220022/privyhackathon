@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { getAccessToken, usePrivy } from "@privy-io/react-auth";
 import Head from "next/head";
 import { ethers } from "ethers";
+//import { createWallet, sendTransaction } from "../api/walletApi"; // 假設您已經創建了這個 API
 
 // 定義交易類型
 interface Transaction {
@@ -26,28 +27,11 @@ export default function DashboardPage() {
   const [sendAmount, setSendAmount] = useState<string>("");
   const [showSend, setShowSend] = useState<boolean>(false);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [wallet, setWallet] = useState<any>(null);
+  const [walletId, setWalletId] = useState<string>(""); // 用於存儲用戶輸入的錢包 ID
+  const [walletAddress, setWalletAddress] = useState<string>(""); // 用於存儲用戶輸入的錢包地址
   const router = useRouter();
-  const {
-    ready,
-    authenticated,
-    user,
-    logout,
-    linkEmail,
-    linkWallet,
-    unlinkEmail,
-    linkPhone,
-    unlinkPhone,
-    unlinkWallet,
-    linkGoogle,
-    unlinkGoogle,
-    linkTwitter,
-    unlinkTwitter,
-    linkDiscord,
-    unlinkDiscord,
-    sendTransaction,
-  } = usePrivy();
-
-  const wallet = user?.wallet;
+  const { ready, authenticated, logout } = usePrivy();
 
   useEffect(() => {
     if (ready && !authenticated) {
@@ -56,28 +40,39 @@ export default function DashboardPage() {
   }, [ready, authenticated, router]);
 
   useEffect(() => {
-    if (wallet?.address) {
-      fetchBalance();
-      fetchTransactionHistory();
-    }
-  }, [wallet?.address]);
+    const fetchWallet = async () => {
+      try {
+        const response = await fetch('http://localhost:3000/api/wallet'); // 從後端獲取錢包信息
+        const data = await response.json();
+        setWallet(data);
+        fetchBalance(data.address);
+        fetchTransactionHistory(data.address);
+      } catch (error) {
+        console.error("Error fetching wallet:", error);
+      }
+    };
 
-  const fetchBalance = async (): Promise<void> => {
-    if (wallet?.address) {
+    if (authenticated) {
+      fetchWallet();
+    }
+  }, [authenticated]);
+
+  const fetchBalance = async (address: string): Promise<void> => {
+    if (address) {
       // 連接到 Sepolia 測試網
       const provider = new ethers.providers.JsonRpcProvider(
         "https://eth-sepolia.g.alchemy.com/v2/qWOLFAmc1qpP8Sbb0GfNrCzen_O1N1pw"
       );
-      const balance = await provider.getBalance(wallet.address);
+      const balance = await provider.getBalance(address);
       setBalance(ethers.utils.formatEther(balance));
     }
   };
 
-  const fetchTransactionHistory = async (): Promise<void> => {
-    if (wallet?.address) {
+  const fetchTransactionHistory = async (address: string): Promise<void> => {
+    if (address) {
       try {
         const response = await fetch(
-          `https://api-sepolia.etherscan.io/api?module=account&action=txlist&address=${wallet.address}&startblock=0&endblock=99999999&sort=desc&apikey=D81GXERPXM4PVA8V3HNF5XRGJF3RKWGDRI`
+          `https://api-sepolia.etherscan.io/api?module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&sort=desc&apikey=D81GXERPXM4PVA8V3HNF5XRGJF3RKWGDRI`
         );
         const data = await response.json();
         if (data.status === "1" && data.result) {
@@ -96,32 +91,83 @@ export default function DashboardPage() {
         return;
       }
 
+      // 將 ETH 轉換為 Wei，然後轉換為十六進制格式
+      const valueInWei = ethers.utils.parseEther(sendAmount).toHexString();
+
       const tx = {
         to: sendAddress,
-        value: ethers.utils.parseEther(sendAmount).toString(),
-        chainId: 11155111  // Sepolia testnet chainId
+        value: valueInWei, // 使用十六進制格式的值
+        chainId: 11155111, // Sepolia testnet chainId
       };
 
-      const { hash } = await sendTransaction(tx);
+      const response = await fetch('http://localhost:3000/api/wallet', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          action: 'send',
+          walletId: walletId, // 使用用戶輸入的 walletId
+          to: tx.to,
+          amount: tx.value, // 使用十六進制格式的值
+        }),
+      });
+
+      const result = await response.json();
       alert("Transaction sent successfully!");
       setShowSend(false);
-      fetchBalance();
-      fetchTransactionHistory();
+      fetchBalance(walletAddress); // 使用用戶輸入的 walletAddress 更新餘額
+      fetchTransactionHistory(walletAddress); // 使用用戶輸入的 walletAddress 更新交易歷史
     } catch (error) {
       console.error("Transaction error:", error);
       alert("Error sending transaction");
     }
   };
 
-  const numAccounts = user?.linkedAccounts?.length || 0;
+  const handleCreateWallet = async (): Promise<void> => {
+    try {
+      const response = await fetch('http://localhost:3000/api/wallet', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          action: 'create',
+        }),
+      });
+
+      const newWallet = await response.json();
+      setWallet(newWallet);
+      fetchBalance(newWallet.address);
+      fetchTransactionHistory(newWallet.address);
+      alert("Wallet created successfully!");
+    } catch (error) {
+      console.error("Error creating wallet:", error);
+      alert("Error creating wallet");
+    }
+  };
+
+  const handleUseExistingWallet = async (): Promise<void> => {
+    if (!walletId || !walletAddress) {
+      alert("Please enter both Wallet ID and Address");
+      return;
+    }
+
+    // 使用用戶輸入的錢包地址和 ID 更新餘額和交易歷史
+    fetchBalance(walletAddress);
+    fetchTransactionHistory(walletAddress);
+    alert("Using existing wallet successfully!");
+  };
+
+  const numAccounts = wallet?.linkedAccounts?.length || 0;
   const canRemoveAccount = numAccounts > 1;
 
-  const email = user?.email;
-  const phone = user?.phone;
+  const email = wallet?.email;
+  const phone = wallet?.phone;
 
-  const googleSubject = user?.google?.subject || null;
-  const twitterSubject = user?.twitter?.subject || null;
-  const discordSubject = user?.discord?.subject || null;
+  const googleSubject = wallet?.google?.subject || null;
+  const twitterSubject = wallet?.twitter?.subject || null;
+  const discordSubject = wallet?.discord?.subject || null;
 
   const formatDate = (timestamp: string): string => {
     return new Date(parseInt(timestamp) * 1000).toLocaleString();
@@ -134,7 +180,7 @@ export default function DashboardPage() {
   return (
     <>
       <Head>
-        <title>My Crypto Wallet (Sepolia Testnet)</title>
+        <title>My Server Wallet (Sepolia Testnet)</title>
       </Head>
 
       <main className="flex flex-col min-h-screen bg-gray-50">
@@ -157,6 +203,39 @@ export default function DashboardPage() {
 
             {/* Main Content */}
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+              {/* Create Wallet Button */}
+              <button 
+                onClick={handleCreateWallet}
+                className="bg-green-600 hover:bg-green-700 text-white py-3 px-4 rounded-lg flex items-center justify-center mb-4"
+              >
+                <span>Create Wallet</span>
+              </button>
+
+              {/* Existing Wallet Input */}
+              <div className="mb-4">
+                <h2 className="text-lg font-semibold">Use Existing Wallet</h2>
+                <input
+                  type="text"
+                  placeholder="Wallet ID"
+                  className="w-full p-2 border rounded mb-2"
+                  value={walletId}
+                  onChange={(e) => setWalletId(e.target.value)}
+                />
+                <input
+                  type="text"
+                  placeholder="Wallet Address"
+                  className="w-full p-2 border rounded mb-2"
+                  value={walletAddress}
+                  onChange={(e) => setWalletAddress(e.target.value)}
+                />
+                <button 
+                  onClick={handleUseExistingWallet}
+                  className="bg-blue-600 hover:bg-blue-700 text-white py-3 px-4 rounded-lg flex items-center justify-center"
+                >
+                  <span>Use Existing Wallet</span>
+                </button>
+              </div>
+
               {/* Wallet Balance Card */}
               <div className="bg-white rounded-lg shadow-md p-6 mb-6">
                 <h2 className="text-sm text-gray-500 uppercase mb-2">Total Balance</h2>
