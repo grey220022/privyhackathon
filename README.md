@@ -19,7 +19,9 @@ NEXT_PUBLIC_PRIVY_APP_ID=<your-privy-app-id>
 
 ## Building locally
 
-run `npm run dev`. 
+run `npm run dev`. (frontend side)
 
-You can now visit http://localhost:3000 to see your app and login with Privy
+run `npx ts-node app/api/wallet/server.ts`. (backend side)
+
+You can now visit http://localhost:3001 to see your app
 
